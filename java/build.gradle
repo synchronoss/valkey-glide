@@ -48,6 +48,7 @@ subprojects {
                 }
             }
         }
+        // TODO: update publishing mechanism to upload release artifacts to GitHub release archives.
         mavenCentral()
     }
     // minimal java compatibility level
@@ -76,7 +77,7 @@ subprojects {
     }
 
     ext {
-        defaultReleaseVersion = "255.255.255"
+        defaultReleaseVersion = "255.255.255-sncr"
         failedTests = []
     }
 
