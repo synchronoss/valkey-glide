@@ -59,32 +59,18 @@ Continue with **Install protobuf compiler** and **Install `ziglang` and `zigbuil
 
 ```bash
 brew update
-brew install openjdk@11 git gcc pkgconfig openssl cmake
+brew install openjdk@11 git gcc pkgconfig openssl cmake rust
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 source "$HOME/.cargo/env"
 ```
 
-Continue with **Install protobuf compiler** below.
 It is not necessary to **Install `ziglang` and `zigbuild`** for MacOS.
 
 **Install protobuf compiler**
 
+The right version of protobuf compiler (`protoc`) will be downloaded during build time for the target platform.
+
 Only protobuf v29.1 is supported. Other versions are not supported and may cause build issues.
-
-Various platform-specific zips can be found [here](https://github.com/protocolbuffers/protobuf/releases/tag/v29.1).
-Choose the appropriate zip for your system and run the commands below, adjusting for the zip you chose:
-
-```bash
-PB_REL="https://github.com/protocolbuffers/protobuf/releases"
-curl -LO $PB_REL/download/v29.1/protoc-29.1-linux-x86_64.zip
-unzip protoc-29.1-linux-x86_64.zip -d $HOME/.local
-export PATH="$PATH:$HOME/.local/bin"
-# Check that the protobuf compiler version 29.1 or higher is installed
-protoc --version
-```
-
-> [!NOTE]
-> You may wish to add the entire `export PATH` line to your shell configuration file to persist this path addition, either `.bashrc` or `.zshrc` depending on which shell you are using.
 
 **Install `ziglang` and `zigbuild`**
 
@@ -178,7 +164,7 @@ Some troubleshooting issues:
 
 An example app (`glide.examples.ExamplesApp`) is available under [examples project](../examples/java). To run the ExamplesApp against a local build of valkey-glide client, you can publish your JAR to local Maven repository as a dependency.
 
-To publish to local maven run (default version `255.255.255`):
+To publish to local maven run (default version `255.255.255-sncr`):
 
 ```bash
 # Run from the `examples/java` folder
@@ -193,7 +179,7 @@ repositories {
 }
 dependencies {
     // Update to use version defined in the previous step
-    implementation group: 'io.valkey', name: 'valkey-glide', version: '255.255.255'
+    implementation group: 'io.valkey', name: 'valkey-glide', version: '255.255.255-sncr'
 }
 ```
 

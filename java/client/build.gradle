@@ -24,7 +24,13 @@ tasks.withType(Javadoc) {
     options.docEncoding = 'UTF-8'
 }
 
+configurations {
+    protoc
+}
+
 dependencies {
+    protoc group: 'com.google.protobuf', name: 'protoc', version: '4.29.1', classifier: osdetector.classifier, ext: 'exe'
+
     implementation group: 'com.google.protobuf', name:'protobuf-java', version: '4.29.1'
     api group: 'org.apache.commons', name: 'commons-lang3', version: '3.20.0'
 
@@ -54,17 +60,29 @@ ext {
         }
         return output.split(" ")[1]
     }
+}
 
-    // osdetector returns 'aarch_64', but rust triplet has 'aarch64'
-    arch = osdetector.arch == 'aarch_64' ? 'aarch64' : osdetector.arch;
+tasks.register('prepareProtoCompiler', Copy) {
+    inputs.files configurations.protoc
+    outputs.dir layout.buildDirectory.dir('protoc')
+    from configurations.protoc
+    into layout.buildDirectory.dir('protoc')
+    rename { fileName ->
+        "protoc-${osdetector.os}"
+    }
+    filePermissions {
+        user.execute = true
+    }
 }
 
 tasks.register('protobuf', Exec) {
+    dependsOn('prepareProtoCompiler')
+    def protocPath = layout.buildDirectory.file("protoc/protoc-${osdetector.os}").get().asFile.absolutePath
     doFirst {
         try {
             new ByteArrayOutputStream().withStream { os ->
                 exec {
-                    commandLine 'protoc', '--version'
+                    commandLine protocPath, '--version'
                     workingDir Paths.get(project.rootDir.path, '..').toFile()
                     standardOutput = os
                 }
@@ -79,7 +97,7 @@ tasks.register('protobuf', Exec) {
 
         project.mkdir(Paths.get(project.projectDir.path, 'src/main/java/glide/models/protobuf').toString())
     }
-    commandLine 'protoc',
+    commandLine protocPath,
         '-Iprotobuf=glide-core/src/protobuf/',
         '--java_out=java/client/src/main/java/glide/models/protobuf',
         'glide-core/src/protobuf/connection_request.proto',
@@ -101,6 +119,7 @@ tasks.register('cleanRust') {
 }
 
 tasks.register('buildRust', Exec) {
+    dependsOn('prepareProtoCompiler')
     def target
     if (project.hasProperty('target')) {
         target = project.target
@@ -124,6 +143,7 @@ tasks.register('buildRust', Exec) {
         commandLine 'cargo', 'build', '--release'
     }
     workingDir project.rootDir
+    environment PROTOC_PATH: project.layout.buildDirectory.file("protoc/protoc-${osdetector.os}").get().asFile.absolutePath
     environment CARGO_TERM_COLOR: 'always'
 }
 
