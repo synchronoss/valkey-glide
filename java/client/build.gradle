@@ -173,6 +173,23 @@ tasks.register('copyNativeLib', Copy) {
     }
     include "*.dylib", "*.so", "*.dll"
     into sourceSets.main.output.resourcesDir
+
+    // Rename libglide_rs.<ext> → libglide_rs-<os.detected.classifier>.<ext>
+    rename { fileName ->
+        def matcher = (fileName =~ /^libglide_rs\.(.+)$/)
+        if (matcher.matches()) {
+            return "libglide_rs-${osdetector.classifier}.${matcher[0][1]}"
+        }
+        return fileName
+    }
+
+    // Delete the original libglide_rs.<ext>
+    doLast {
+        // Remove original libglide_rs.* files
+        fileTree(destinationDir).matching {
+            include "libglide_rs.*"
+        }.each { it.delete() }
+    }
 }
 
 delombok.dependsOn('compileJava')
