@@ -1,3 +1,4 @@
+/** Copyright Valkey GLIDE Project Contributors - SPDX Identifier: Apache-2.0 */
 package glide.ffi.resolvers;
 
 import java.io.*;
@@ -7,35 +8,39 @@ import java.util.Locale;
 import java.util.logging.Level;
 
 /**
- * A modified version of {@code NativeUtils} from the valkey-glide project.
- * This utility class facilitates loading native libraries packaged within JAR archives.
+ * A modified version of {@code NativeUtils} from the valkey-glide project. This utility class
+ * facilitates loading native libraries packaged within JAR archives.
  *
- * <p>This version of {@code NativeUtils} assumes that the {@code libglide_rs.<ext>} files
- * are named in the format {@code libglide_rs-<os>-<classifier>.<ext>}.
- * For example, instead of {@code libglide_rs.so}, it could be
- * {@code libglide_rs-linux-x86_64.so}.
+ * <p>This version of {@code NativeUtils} assumes that the {@code libglide_rs.<ext>} files are named
+ * in the format {@code libglide_rs-<os>-<classifier>.<ext>}. For example, instead of {@code
+ * libglide_rs.so}, it could be {@code libglide_rs-linux-x86_64.so}.
  *
  * <p>The following runtime libraries are supported for discovery:
+ *
  * <ul>
- *   <li>{@code libglide_rs-osx-aarch_64.dylib}</li>
- *   <li>{@code libglide_rs-osx-x86_64.dylib}</li>
- *   <li>{@code libglide_rs-linux-aarch_64.so}</li>
- *   <li>{@code libglide_rs-linux-x86_64.so}</li>
+ *   <li>{@code libglide_rs-osx-aarch_64.dylib}
+ *   <li>{@code libglide_rs-osx-x86_64.dylib}
+ *   <li>{@code libglide_rs-linux-aarch_64.so}
+ *   <li>{@code libglide_rs-linux-x86_64.so}
  * </ul>
  *
- * <p>Original sources:</p>
+ * <p>Original sources:
+ *
  * <ul>
- *   <li><a href="https://github.com/valkey-io/valkey-glide/blob/main/java/client/src/main/java/glide/ffi/resolvers/NativeUtils.java">
- *       https://github.com/valkey-io/valkey-glide/blob/main/java/client/src/main/java/glide/ffi/resolvers/NativeUtils.java</a></li>
- *   <li><a href="https://raw.githubusercontent.com/adamheinrich/native-utils/master/src/main/java/cz/adamh/utils/NativeUtils.java">
- *       https://raw.githubusercontent.com/adamheinrich/native-utils/master/src/main/java/cz/adamh/utils/NativeUtils.java</a></li>
+ *   <li><a
+ *       href="https://github.com/valkey-io/valkey-glide/blob/main/java/client/src/main/java/glide/ffi/resolvers/NativeUtils.java">
+ *       https://github.com/valkey-io/valkey-glide/blob/main/java/client/src/main/java/glide/ffi/resolvers/NativeUtils.java</a>
+ *   <li><a
+ *       href="https://raw.githubusercontent.com/adamheinrich/native-utils/master/src/main/java/cz/adamh/utils/NativeUtils.java">
+ *       https://raw.githubusercontent.com/adamheinrich/native-utils/master/src/main/java/cz/adamh/utils/NativeUtils.java</a>
  *   <li><a href="https://github.com/adamheinrich/native-utils">
- *       https://github.com/adamheinrich/native-utils</a></li>
+ *       https://github.com/adamheinrich/native-utils</a>
  * </ul>
  */
 public final class NativeUtils {
 
-    private static final java.util.logging.Logger logger = java.util.logging.Logger.getLogger(NativeUtils.class.getName());
+    private static final java.util.logging.Logger logger =
+            java.util.logging.Logger.getLogger(NativeUtils.class.getName());
 
     /**
      * The minimum length a prefix for a file has to have according to {@link
@@ -43,34 +48,22 @@ public final class NativeUtils {
      */
     private static final int MIN_PREFIX_LENGTH = 3;
 
-    /**
-     * Temporary directory to store the native runtime when loading.
-     */
+    /** Temporary directory to store the native runtime when loading. */
     public static final String NATIVE_FOLDER_PATH_PREFIX = "nativeutils";
 
-    /**
-     * Temporary directory which will contain the dynamic library files.
-     */
+    /** Temporary directory which will contain the dynamic library files. */
     private static File temporaryDir;
 
-    /**
-     * The native runtime filename for macOS (arm).
-     */
+    /** The native runtime filename for macOS (arm). */
     private static final String LIB_OSX_AARCH_64 = "libglide_rs-osx-aarch_64.dylib";
 
-    /**
-     * The native runtime filename for macOS (x86).
-     */
+    /** The native runtime filename for macOS (x86). */
     private static final String LIB_OSX_X86_64 = "libglide_rs-osx-x86_64.dylib";
 
-    /**
-     * The native runtime filename for Linux (arm).
-     */
+    /** The native runtime filename for Linux (arm). */
     private static final String LIB_LINUX_AARCH_64 = "libglide_rs-linux-aarch_64.so";
 
-    /**
-     * The native runtime filename for Linux (x86).
-     */
+    /** The native runtime filename for Linux (x86). */
     private static final String LIB_LINUX_X86_64 = "libglide_rs-linux-x86_64.so";
 
     /** Private constructor - this class will never be instanced */
@@ -86,14 +79,13 @@ public final class NativeUtils {
         }
     }
 
-    /**
-     * Logs the location that NativeUtils was loaded from.
-     * Useful for debugging.
-     */
+    /** Logs the location that NativeUtils was loaded from. Useful for debugging. */
     private static void logClassInfo() {
         Class<?> clazz = NativeUtils.class;
         URL location = clazz.getProtectionDomain().getCodeSource().getLocation();
-        log(Level.FINE, String.format("Using NativeUtils class: %s from %s", clazz.getName(), location));
+        log(
+                Level.FINE,
+                String.format("Using NativeUtils class: %s from %s", clazz.getName(), location));
     }
 
     /**
@@ -173,7 +165,7 @@ public final class NativeUtils {
             libName = isArm ? LIB_LINUX_AARCH_64 : LIB_LINUX_X86_64;
         } else {
             throw new UnsupportedOperationException(
-                "OS not supported. Glide is only available on Mac OS and Linux systems.");
+                    "OS not supported. Glide is only available on Mac OS and Linux systems.");
         }
         log(Level.FINE, "Determined native library name: " + libName);
         return libName;
