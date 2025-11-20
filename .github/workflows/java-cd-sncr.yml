@@ -1,0 +1,198 @@
+name: Java Prepare Deployment (SNCR)
+
+on:
+    push:
+        tags:
+            - "v*.*-sncr"
+    workflow_dispatch:
+        inputs:
+            version:
+                description: "The release version of GLIDE, formatted as *.*.*-sncr or *.*.*-sncr-rc*"
+                required: true
+
+concurrency:
+    group: java-cd-${{ github.head_ref || github.ref }}
+    cancel-in-progress: true
+
+permissions:
+    id-token: write
+
+jobs:
+    load-platform-matrix:
+        runs-on: ubuntu-latest
+        environment: AWS_ACTIONS
+        outputs:
+            PLATFORM_MATRIX: ${{ steps.load-platform-matrix.outputs.PLATFORM_MATRIX }}
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: load-platform-matrix
+              id: load-platform-matrix
+              shell: bash
+              run: |
+                  export PLATFORM_MATRIX=$(jq 'map(
+                      select(.PACKAGE_MANAGERS != null and (.PACKAGE_MANAGERS | contains(["maven"])))
+                      | .RUNNER = (
+                          if (.RUNNER | type == "array")
+                          then (.RUNNER | map(if . == "ephemeral" then "persistent" else . end))
+                          else (if .RUNNER == "ephemeral" then "persistent" else .RUNNER end)
+                          end
+                      )
+                  )' < .github/json_matrices/build-matrix.json | jq -c .)
+                  echo "PLATFORM_MATRIX=${PLATFORM_MATRIX}" >> $GITHUB_OUTPUT
+
+    set-release-version:
+        runs-on: ubuntu-latest
+        outputs:
+            RELEASE_VERSION: ${{ steps.release-version.outputs.RELEASE_VERSION }}
+        steps:
+            - name: Set the release version
+              id: release-version
+              shell: bash
+              run: |
+                  if ${{ github.event_name == 'workflow_dispatch' }}; then
+                      R_VERSION="${{ env.INPUT_VERSION }}"
+                  else
+                      R_VERSION=${GITHUB_REF:11}
+                  fi
+                  echo "RELEASE_VERSION=${R_VERSION}" >> $GITHUB_ENV
+                  echo "Release version detected: $R_VERSION"
+                  echo "RELEASE_VERSION=$R_VERSION" >> $GITHUB_OUTPUT
+              env:
+                  INPUT_VERSION: ${{ github.event.inputs.version }}
+            - name: Debug Info
+              run: echo "Owner is ${{ github.repository_owner }}"
+    create-binaries-to-publish:
+        needs: [set-release-version, load-platform-matrix]
+        if: github.repository_owner == 'synchronoss'
+        timeout-minutes: 35
+        env:
+            JAVA_VERSION: "11"
+            RELEASE_VERSION: ${{ needs.set-release-version.outputs.RELEASE_VERSION }}
+        strategy:
+            fail-fast: false
+            matrix:
+                host: ${{ fromJson(needs.load-platform-matrix.outputs.PLATFORM_MATRIX) }}
+
+        runs-on: ${{ matrix.host.RUNNER }}
+
+        steps:
+            - name: Setup self-hosted runner access
+              run: |
+                  GHA_HOME=/home/ubuntu/actions-runner/_work/valkey-glide
+                  if [ -d $GHA_HOME ]; then
+                    sudo chown -R $USER:$USER $GHA_HOME
+                    sudo rm -rf $GHA_HOME
+                    mkdir -p $GHA_HOME/valkey-glide
+                  fi
+
+            - uses: actions/checkout@v4
+
+            - name: Set up JDK
+              uses: actions/setup-java@v4
+              with:
+                  distribution: "temurin"
+                  java-version: ${{ env.JAVA_VERSION }}
+
+            - name: Install shared software dependencies
+              uses: ./.github/workflows/install-shared-dependencies
+              with:
+                  os: ${{ matrix.host.OS }}
+                  target: ${{ matrix.host.CD_TARGET || matrix.host.TARGET }}
+                  github-token: ${{ secrets.GITHUB_TOKEN }}
+
+            - name: Run rustup with correct target
+              if: ${{ contains(matrix.host.TARGET, 'musl') }}
+              run: rustup target add ${{ matrix.host.TARGET }}
+
+            - name: Install protoc (protobuf)
+              uses: arduino/setup-protoc@v3
+              with:
+                  version: "29.1"
+                  repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+            - name: Cache Gradle dependencies
+              uses: actions/cache@v4
+              with:
+                  path: |
+                      ~/.gradle/caches
+                      ~/.gradle/wrapper
+                  key: ${{ runner.os }}-gradle-cd-${{ hashFiles('java/**/*.gradle*', 'java/**/gradle-wrapper.properties') }}
+                  restore-keys: |
+                      ${{ runner.os }}-gradle-cd-
+                      ${{ runner.os }}-gradle-
+
+            - name: Build java client
+              working-directory: java
+              run: |
+                  if [[ "${{ matrix.host.TARGET }}" == *"musl"* ]]; then
+                    ./gradlew --build-cache :client:publishToMavenLocal \
+                      -Ptarget=${{ matrix.host.TARGET }}
+
+                    ./gradlew --build-cache :jedis-compatibility:publishToMavenLocal \
+                      -Ptarget=${{ matrix.host.TARGET }}
+                  else
+                    ./gradlew --build-cache :client:publishToMavenLocal
+
+                    ./gradlew --build-cache :jedis-compatibility:publishToMavenLocal
+                  fi
+              env:
+                  GLIDE_RELEASE_VERSION: ${{ env.RELEASE_VERSION }}
+
+            - name: Bundle JAR
+              working-directory: java
+              run: |
+                  src=~/.m2/repository/io/valkey/valkey-glide/${{ env.RELEASE_VERSION }}
+                  cd $src
+                  jar -cvf bundle.jar *
+                  cd -
+                  cp $src/bundle.jar bundle-${{ matrix.host.TARGET }}.jar
+
+                  jedis_src=~/.m2/repository/io/valkey/valkey-glide-jedis-compatibility/${{ env.RELEASE_VERSION }}
+                  cd $jedis_src
+                  jar -cvf jedis-bundle.jar *
+                  cd -
+                  cp $jedis_src/jedis-bundle.jar jedis-bundle-${{ matrix.host.TARGET }}.jar
+
+            - name: Upload artifacts to publish
+              uses: actions/upload-artifact@v4
+              with:
+                  name: java-${{ matrix.host.TARGET }}
+                  path: |
+                      java/bundle*.jar
+                      java/jedis-bundle*.jar
+
+    package-release-artifacts:
+        needs: [create-binaries-to-publish]
+        runs-on: ubuntu-latest
+        env:
+            RELEASE_VERSION: ${{ needs.set-release-version.outputs.RELEASE_VERSION }}
+        steps:
+            - name: Download published artifacts
+              uses: actions/download-artifact@v4
+
+            - name: Move all required files to one directory
+              run: |
+                  mkdir maven-files
+                  cd maven-files
+                  for file in $(find ../. -name "*.jar"); do jar xf "$file" ; done
+
+            - name: Move files to correct directory tree
+              run: |
+                  mkdir -p build/io/valkey/valkey-glide/${{ env.RELEASE_VERSION }}
+                  mkdir -p build/io/valkey/valkey-glide-jedis-compatibility/${{ env.RELEASE_VERSION }}
+
+                  cp -a maven-files/valkey-glide-jedis-compatibility* build/io/valkey/valkey-glide-jedis-compatibility/${{ env.RELEASE_VERSION }}
+
+                  find maven-files -name "valkey-glide-*" ! -name "*jedis-compatibility*" \
+                    -exec cp {} build/io/valkey/valkey-glide/${{ env.RELEASE_VERSION }}/ \;
+
+                  cd build
+                  zip -r ../build.zip io
+
+            - name: Upload final build.zip artifact
+              uses: actions/upload-artifact@v4
+              with:
+                  name: valkey-${{ env.RELEASE_VERSION }}
+                  path: build.zip
