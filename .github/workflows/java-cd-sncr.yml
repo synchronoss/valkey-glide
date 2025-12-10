@@ -1,14 +1,17 @@
-name: Java Prepare Deployment (SNCR)
+name: Java Build and Release (SNCR)
 
 on:
     push:
         tags:
-            - "v*.*-sncr"
+            - "*-sncr*"
     workflow_dispatch:
         inputs:
             version:
                 description: "The release version of GLIDE, formatted as *.*.*-sncr or *.*.*-sncr-rc*"
                 required: true
+
+env:
+    DRY_RUN: false # set to true for a test run without creating release
 
 concurrency:
     group: java-cd-${{ github.head_ref || github.ref }}
@@ -32,16 +35,28 @@ jobs:
               shell: bash
               run: |
                   export PLATFORM_MATRIX=$(jq 'map(
-                      select(.PACKAGE_MANAGERS != null and (.PACKAGE_MANAGERS | contains(["maven"])))
+                      select(
+                          (.PACKAGE_MANAGERS != null) and (.PACKAGE_MANAGERS | contains(["maven"]))
+                              and (
+                                  ( (.RUNNER | type == "array") and (.RUNNER[1] != "Windows") )
+                              or
+                                  ( (.RUNNER | type != "array") and ((.RUNNER | test("(?i)windows")) | not) )
+                              )
+                          )
                       | .RUNNER = (
-                          if (.RUNNER | type == "array")
-                          then (.RUNNER | map(if . == "ephemeral" then "persistent" else . end))
-                          else (if .RUNNER == "ephemeral" then "persistent" else .RUNNER end)
+                          if (.RUNNER | type == "array") then
+                              # Map Linux ARM64 ephemeral to GitHub-hosted runner
+                              if (.RUNNER[0]=="self-hosted" and .RUNNER[1]=="Linux" and .RUNNER[2]=="ARM64") then
+                                  "ubuntu-24.04-arm"
+                              else
+                                  (.RUNNER | map(if . == "ephemeral" then "persistent" else . end))
+                              end
+                          else
+                              if .RUNNER == "ephemeral" then "persistent" else .RUNNER end
                           end
                       )
                   )' < .github/json_matrices/build-matrix.json | jq -c .)
                   echo "PLATFORM_MATRIX=${PLATFORM_MATRIX}" >> $GITHUB_OUTPUT
-
     set-release-version:
         runs-on: ubuntu-latest
         outputs:
@@ -196,3 +211,39 @@ jobs:
               with:
                   name: valkey-${{ env.RELEASE_VERSION }}
                   path: build.zip
+
+    release:
+        needs: package-release-artifacts
+        runs-on: ubuntu-latest
+        env:
+            RELEASE_VERSION: ${{ needs.set-release-version.outputs.RELEASE_VERSION }}
+        permissions:
+            contents: write
+            actions: read
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Download all artifacts
+              uses: actions/download-artifact@v4
+              with:
+                  path: artifacts
+                  name: valkey-${{ env.RELEASE_VERSION }}
+
+            - name: List downloaded artifacts
+              run: ls -R artifacts
+
+            - name: Create GitHub Release
+              if: env.DRY_RUN != 'true'
+              uses: softprops/action-gh-release@v2
+              with:
+                  tag_name: ${{ env.RELEASE_VERSION }}
+                  name: Release ${{ env.RELEASE_VERSION }}
+                  generate_release_notes: true
+                  files: artifacts/**/*
+
+            - name: DRY_RUN info
+              if: env.DRY_RUN == 'true'
+              run: |
+                  echo "DRY_RUN enabled. Would have created release ${{ env.RELEASE_VERSION }}"
+                  echo "Artifacts are ready at artifacts/***"
