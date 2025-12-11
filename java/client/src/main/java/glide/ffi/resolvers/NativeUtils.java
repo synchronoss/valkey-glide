@@ -69,6 +69,9 @@ public final class NativeUtils {
     /** The native runtime filename for Linux (x86). */
     private static final String LIB_LINUX_X86_64 = "libglide_rs-linux-x86_64.so";
 
+    /** The native runtime filename for Windows (x86). */
+    private static final String LIB_WINDOWS_X86_64 = "libglide_rs-windows-x86_64.dll";
+
     /** Private constructor - this class will never be instanced */
     private NativeUtils() {}
 
@@ -166,14 +169,17 @@ public final class NativeUtils {
         String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
         String arch = System.getProperty("os.arch", "").toLowerCase(Locale.ROOT);
         boolean isArm = arch.contains("aarch") || arch.contains("arm");
-        final String libName;
+        String libName = null;
         if (os.contains("mac")) {
             libName = isArm ? LIB_OSX_AARCH_64 : LIB_OSX_X86_64;
         } else if (os.contains("linux")) {
             libName = isArm ? LIB_LINUX_AARCH_64 : LIB_LINUX_X86_64;
-        } else {
+        } else if (os.contains("windows") && !isArm) {
+            libName = LIB_WINDOWS_X86_64;
+        }
+        if (libName == null) {
             throw new UnsupportedOperationException(
-                    "OS not supported. Glide is only available on Mac OS and Linux systems.");
+                    "OS not supported. Glide is only available on Mac OS, Linux and Windows (x86) systems.");
         }
         log(Level.FINE, "Determined native library name: " + libName);
         return libName;
