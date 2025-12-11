@@ -3,16 +3,15 @@ name: Java Prepare Deployment
 on:
     push:
         tags:
-            - "v*.*"
+            - "*-sncr*"
     workflow_dispatch:
         inputs:
             version:
-                description: "The release version of GLIDE, formatted as *.*.* or *.*.*-rc*"
+                description: "The release version of GLIDE, formatted as *.*.*-sncr or *.*.*-sncr-rc*"
                 required: true
-            maven_publish:
-                description: "Publish to Maven Central"
-                required: true
-                type: boolean
+
+env:
+    DRY_RUN: false # set to true for a test run without creating release
 
 concurrency:
     group: java-cd-${{ github.head_ref || github.ref }}
@@ -35,13 +34,25 @@ jobs:
               id: load-platform-matrix
               shell: bash
               run: |
-                  # Filter entries with maven in PACKAGE_MANAGERS and replace "ephemeral" with "persistent" in RUNNER
                   export PLATFORM_MATRIX=$(jq 'map(
-                      select(.PACKAGE_MANAGERS != null and (.PACKAGE_MANAGERS | contains(["maven"])))
+                      select(
+                          (.PACKAGE_MANAGERS != null) and (.PACKAGE_MANAGERS | contains(["maven"]))
+                              and (
+                                  ( (.RUNNER | type == "array") and (.RUNNER[1] != "Windows") )
+                              or
+                                  ( (.RUNNER | type != "array") and ((.RUNNER | test("(?i)windows")) | not) )
+                              )
+                          )
                       | .RUNNER = (
-                          if (.RUNNER | type == "array")
-                          then (.RUNNER | map(if . == "ephemeral" then "persistent" else . end))
-                          else (if .RUNNER == "ephemeral" then "persistent" else .RUNNER end)
+                          if (.RUNNER | type == "array") then
+                              # Map Linux ARM64 ephemeral to GitHub-hosted runner
+                              if (.RUNNER[0]=="self-hosted" and .RUNNER[1]=="Linux" and .RUNNER[2]=="ARM64") then
+                                  "ubuntu-24.04-arm"
+                              else
+                                  (.RUNNER | map(if . == "ephemeral" then "persistent" else . end))
+                              end
+                          else
+                              if .RUNNER == "ephemeral" then "persistent" else .RUNNER end
                           end
                       )
                   )' < .github/json_matrices/build-matrix.json | jq -c .)
@@ -59,7 +70,7 @@ jobs:
                   if ${{ github.event_name == 'workflow_dispatch' }}; then
                       R_VERSION="${{ env.INPUT_VERSION }}"
                   else
-                      R_VERSION=${GITHUB_REF:11}
+                      R_VERSION=${GITHUB_REF:10}
                   fi
                   echo "RELEASE_VERSION=${R_VERSION}" >> $GITHUB_ENV
                   echo "Release version detected: $R_VERSION"
@@ -69,7 +80,7 @@ jobs:
 
     create-binaries-to-publish:
         needs: [set-release-version, load-platform-matrix]
-        if: github.repository_owner == 'valkey-io'
+        if: github.repository_owner == 'synchronoss'
         timeout-minutes: 35
         env:
             JAVA_VERSION: "11"
@@ -132,26 +143,6 @@ jobs:
                       ${{ runner.os }}-gradle-cd-
                       ${{ runner.os }}-gradle-
 
-            - name: Create secret key ring file for all Java submodules
-              working-directory: java/client
-              shell: bash
-              run: |
-                  # Decode the provided base64 GPG key into the client module
-                  echo "$SECRING_GPG" | base64 --decode > ./secring.gpg
-
-                  # Copy the key ring file into the jedis-compatibility module which also performs signing
-                  if [ -d ../jedis-compatibility ]; then
-                    cp ./secring.gpg ../jedis-compatibility/secring.gpg
-                  else
-                    echo "jedis-compatibility module directory not found" >&2
-                    exit 1
-                  fi
-
-                  echo "Listing key ring files to verify presence:"
-                  ls -l ./secring.gpg ../jedis-compatibility/secring.gpg
-              env:
-                  SECRING_GPG: ${{ secrets.SECRING_GPG }}
-
             - name: Build java client
               working-directory: java
               shell: bash
@@ -173,7 +164,7 @@ jobs:
                     $GRADLE_CMD --build-cache :client:publishToMavenLocal -Psigning.secretKeyRingFile=secring.gpg \
                     -Psigning.password="${{ secrets.GPG_PASSWORD }}" -Psigning.keyId=${{ secrets.GPG_KEY_ID }} \
                     -Ptarget=${{ matrix.host.TARGET }} $EXTRA_ARGS
-                    
+
                     # Then build jedis-compatibility
                     $GRADLE_CMD --build-cache :jedis-compatibility:publishToMavenLocal -Psigning.secretKeyRingFile=secring.gpg \
                     -Psigning.password="${{ secrets.GPG_PASSWORD }}" -Psigning.keyId=${{ secrets.GPG_KEY_ID }} \
@@ -182,7 +173,7 @@ jobs:
                     # Build and publish client first
                     $GRADLE_CMD --build-cache :client:publishToMavenLocal -Psigning.secretKeyRingFile=secring.gpg \
                     -Psigning.password="${{ secrets.GPG_PASSWORD }}" -Psigning.keyId=${{ secrets.GPG_KEY_ID }} $EXTRA_ARGS
-                    
+
                     # Then build jedis-compatibility
                     $GRADLE_CMD --build-cache :jedis-compatibility:publishToMavenLocal -Psigning.secretKeyRingFile=secring.gpg \
                     -Psigning.password="${{ secrets.GPG_PASSWORD }}" -Psigning.keyId=${{ secrets.GPG_KEY_ID }} $EXTRA_ARGS
@@ -217,12 +208,9 @@ jobs:
                       java/bundle*.jar
                       java/jedis-bundle*.jar
 
-    publish-to-maven-central-deployment:
-        if: ${{ inputs.maven_publish == true || github.event_name == 'push' }}
+    package-release-artifacts:
         needs: [set-release-version, create-binaries-to-publish]
         runs-on: ubuntu-latest
-        outputs:
-            DEPLOYMENT_ID: ${{ steps.maven-deployment.outputs.DEPLOYMENT_ID }}
         env:
             RELEASE_VERSION: ${{ needs.set-release-version.outputs.RELEASE_VERSION }}
         steps:
@@ -230,202 +218,62 @@ jobs:
               uses: actions/download-artifact@v4
 
             - name: Move all required files to one directory
-              shell: bash
               run: |
                   mkdir maven-files
                   cd maven-files
                   for file in $(find ../. -name "*.jar"); do jar xf "$file" ; done
 
-            - name: Generate sha1 and md5 files for all Maven files
-              shell: bash
-              run: |
-                  cd maven-files
-                  for i in *.jar *.pom *.module; do md5sum $i | cut -d ' ' -f 1 > $i.md5; done
-                  for i in *.jar *.pom *.module; do sha1sum $i | cut -d ' ' -f 1 > $i.sha1; done
-
-            - name: Move files to the correct directory tree
-              shell: bash
+            - name: Move files to correct directory tree
               run: |
                   mkdir -p build/io/valkey/valkey-glide/${{ env.RELEASE_VERSION }}
                   mkdir -p build/io/valkey/valkey-glide-jedis-compatibility/${{ env.RELEASE_VERSION }}
 
-                  # Move jedis-compatibility files first
                   cp -a maven-files/valkey-glide-jedis-compatibility* build/io/valkey/valkey-glide-jedis-compatibility/${{ env.RELEASE_VERSION }}
 
-                  # Move client files (exclude jedis-compatibility files)
-                  find maven-files -name "valkey-glide-*" ! -name "*jedis-compatibility*" -exec cp {} build/io/valkey/valkey-glide/${{ env.RELEASE_VERSION }}/ \;
+                  find maven-files -name "valkey-glide-*" ! -name "*jedis-compatibility*" \
+                    -exec cp {} build/io/valkey/valkey-glide/${{ env.RELEASE_VERSION }}/ \;
 
-                  rm -rf build/io/valkey/valkey-glide/${{ env.RELEASE_VERSION }}/META-INF
-                  rm -rf build/io/valkey/valkey-glide-jedis-compatibility/${{ env.RELEASE_VERSION }}/META-INF
                   cd build
-                  zip -r ../build io
+                  zip -r ../build.zip io
 
-            - name: Upload bundle to CI artifacts
+            - name: Upload final build.zip artifact
               uses: actions/upload-artifact@v4
               with:
                   name: valkey-${{ env.RELEASE_VERSION }}
-                  path: |
-                      build
+                  path: build.zip
 
-            - name: Publish to Maven Central
-              id: maven-deployment
-              shell: bash
-              run: |
-                  export DEPLOYMENT_ID=`curl --request POST \
-                  -u "${{ secrets.CENTRAL_TOKEN_USERNAME }}:${{ secrets.CENTRAL_TOKEN_PASSWORD }}" \
-                  --form bundle=@build.zip \
-                  https://central.sonatype.com/api/v1/publisher/upload | tail -n 1`
-                  echo "DEPLOYMENT_ID=$DEPLOYMENT_ID" >> $GITHUB_ENV
-                  echo "DEPLOYMENT_ID=$DEPLOYMENT_ID" >> $GITHUB_OUTPUT
-                  echo Uploaded to Maven deployment with deployment ID $DEPLOYMENT_ID. Will be released if smoke tests pass and approved for release.
-
-            - name: Check status of deployment
-              shell: bash
-              run: |
-                  for ((retries = 0; retries < 20; retries++)); do
-                      sleep 5
-                      export DEPLOYMENT_STATUS=`curl --request POST \
-                      -u "${{ secrets.CENTRAL_TOKEN_USERNAME }}:${{ secrets.CENTRAL_TOKEN_PASSWORD }}" \
-                      "https://central.sonatype.com/api/v1/publisher/status?id=${{ env.DEPLOYMENT_ID }}" \
-                      | jq '.deploymentState'`
-
-                      if [[ $DEPLOYMENT_STATUS == ""\"VALIDATED"\"" ]]; then exit 0; fi
-                  done
-
-                  curl --request POST \
-                  -u "${{ secrets.CENTRAL_TOKEN_USERNAME }}:${{ secrets.CENTRAL_TOKEN_PASSWORD }}" \
-                  "https://central.sonatype.com/api/v1/publisher/status?id=${{ env.DEPLOYMENT_ID }}" \
-                  | jq
-                  echo "Deployment ${{ env.DEPLOYMENT_ID }} was unsuccessful with status $DEPLOYMENT_STATUS"
-                  exit 1
-
-    test-deployment-on-all-architectures:
-        needs:
-            [
-                set-release-version,
-                load-platform-matrix,
-                publish-to-maven-central-deployment,
-            ]
+    release:
+        needs: [set-release-version, package-release-artifacts]
+        runs-on: ubuntu-latest
         env:
-            JAVA_VERSION: "11"
             RELEASE_VERSION: ${{ needs.set-release-version.outputs.RELEASE_VERSION }}
-        strategy:
-            # Run all jobs
-            fail-fast: false
-            matrix:
-                host: ${{ fromJson(needs.load-platform-matrix.outputs.PLATFORM_MATRIX) }}
-                exclude:
-                    - host:
-                          TARGET: aarch64-unknown-linux-musl
-                    # TODO: Remove Windows exclusion when Windows integration tests are implemented
-                    - host:
-                          OS: windows
-        runs-on: ${{ matrix.host.test-runner || matrix.host.runner }}
-        container:
-            image: ${{ matrix.host.IMAGE || ''}}
-            options: ${{ join(' -q ', matrix.host.CONTAINER_OPTIONS) }} # adding `-q` to bypass empty options
+        permissions:
+            contents: write
+            actions: read
         steps:
-            - name: Setup self-hosted runner access
-              if: ${{matrix.host.TARGET == 'aarch64-unknown-linux-gnu' }}
-              run: sudo chown -R $USER:$USER /home/ubuntu/action-runner-ilia/_work/valkey-glide
-
             - name: Checkout
               uses: actions/checkout@v4
 
-            - name: Set up JDK
-              uses: actions/setup-java@v4
+            - name: Download all artifacts
+              uses: actions/download-artifact@v4
               with:
-                  distribution: "temurin"
-                  java-version: ${{ env.JAVA_VERSION }}
+                  path: artifacts
+                  name: valkey-${{ env.RELEASE_VERSION }}
 
-            - name: Install git and Java for musl
-              if: ${{ contains(matrix.host.TARGET, 'musl') }}
-              run: |
-                  # Set environment variable to indicate container environment for Gradle
-                  echo "GLIDE_CONTAINER_BUILD=true" >> $GITHUB_ENV
-                  apk add openjdk11 git bash
-                  export JAVA_HOME=/usr/lib/jvm/java-11-openjdk
-                  # Create gradle user home and disable auto-download
-                  mkdir -p ~/.gradle
-                  echo "org.gradle.java.installations.auto-download=false" >> ~/.gradle/gradle.properties
-                  echo JAVA_HOME=/usr/lib/jvm/java-11-openjdk >> $GITHUB_ENV
-              env:
-                  JAVA_HOME: ${{ env.JAVA_HOME }}
+            - name: List downloaded artifacts
+              run: ls -R artifacts
 
-            - name: Install shared software dependencies
-              uses: ./.github/workflows/install-shared-dependencies
+            - name: Create GitHub Release
+              if: env.DRY_RUN != 'true'
+              uses: softprops/action-gh-release@v2
               with:
-                  os: ${{ matrix.host.OS }}
-                  engine-version: "7.2"
-                  target: ${{ matrix.host.TARGET }}
-                  github-token: ${{ secrets.GITHUB_TOKEN }}
+                  tag_name: ${{ env.RELEASE_VERSION }}
+                  name: Release ${{ env.RELEASE_VERSION }}
+                  generate_release_notes: true
+                  files: artifacts/**/*
 
-            - name: Install protoc (protobuf)
-              uses: arduino/setup-protoc@v3
-              with:
-                  version: "29.1"
-                  repo-token: ${{ secrets.GITHUB_TOKEN }}
-
-            - name: Cache Gradle dependencies
-              uses: actions/cache@v4
-              with:
-                  path: |
-                      ~/.gradle/caches
-                      ~/.gradle/wrapper
-                  key: ${{ runner.os }}-gradle-test-cd-${{ hashFiles('java/**/*.gradle*', 'java/**/gradle-wrapper.properties') }}
-                  restore-keys: |
-                      ${{ runner.os }}-gradle-test-cd-
-                      ${{ runner.os }}-gradle-cd-
-                      ${{ runner.os }}-gradle-
-
-            - name: Start standalone Valkey server
-              working-directory: utils
-              id: port
+            - name: DRY_RUN info
+              if: env.DRY_RUN == 'true'
               run: |
-                  PORT=$(python3 ./cluster_manager.py start -r 0 2>&1 | grep CLUSTER_NODES | cut -d = -f 2 | cut -d , -f 1 | cut -d : -f 2)
-                  echo "PORT=$PORT" >> $GITHUB_OUTPUT
-
-            - name: Test deployment
-              working-directory: java
-              env:
-                  PORT: ${{ steps.port.outputs.PORT }}
-              run: |
-                  export ORG_GRADLE_PROJECT_centralManualTestingAuthHeaderName="Authorization"
-                  export ORG_GRADLE_PROJECT_centralManualTestingAuthHeaderValue="Bearer $(echo "${{ secrets.CENTRAL_TOKEN_USERNAME }}:${{ secrets.CENTRAL_TOKEN_PASSWORD }}" | base64)"
-                  export GLIDE_RELEASE_VERSION=${{ env.RELEASE_VERSION }}
-                  ./gradlew --build-cache :benchmarks:run --args="--minimal --clients glide --port ${{ env.PORT }}"
-
-    publish-release-to-maven:
-        if: ${{ inputs.maven_publish == true || github.event_name == 'push' }}
-        needs:
-            [
-                publish-to-maven-central-deployment,
-                test-deployment-on-all-architectures,
-            ]
-        runs-on: ubuntu-latest
-        environment: AWS_ACTIONS
-        env:
-            DEPLOYMENT_ID: ${{ needs.publish-to-maven-central-deployment.outputs.DEPLOYMENT_ID }}
-        steps:
-            - name: Publish to Maven
-              run: |
-                  curl --request POST \
-                  -u "${{ secrets.CENTRAL_TOKEN_USERNAME }}:${{ secrets.CENTRAL_TOKEN_PASSWORD }}" \
-                  "https://central.sonatype.com/api/v1/publisher/deployment/${{ env.DEPLOYMENT_ID }}"
-
-    drop-deployment-if-validation-fails:
-        if: ${{ failure() }}
-        needs:
-            [
-                publish-to-maven-central-deployment,
-                test-deployment-on-all-architectures,
-            ]
-        runs-on: ubuntu-latest
-        env:
-            DEPLOYMENT_ID: ${{ needs.publish-to-maven-central-deployment.outputs.DEPLOYMENT_ID }}
-        steps:
-            - name: Drop deployment if validation fails
-              run: |
-                  curl --request DELETE \
-                  -u "${{ secrets.CENTRAL_TOKEN_USERNAME }}:${{ secrets.CENTRAL_TOKEN_PASSWORD }}" \
-                  "https://central.sonatype.com/api/v1/publisher/deployment/${{ env.DEPLOYMENT_ID }}"
+                  echo "DRY_RUN enabled. Would have created release ${{ env.RELEASE_VERSION }}"
+                  echo "Artifacts are ready at artifacts/***"
