@@ -3,7 +3,6 @@ import java.nio.file.Paths
 plugins {
     id 'java-library'
     id 'maven-publish'
-    id 'signing'
     id 'io.freefair.lombok' version '8.6'
     id 'com.github.spotbugs' version '6.4.2'
     id 'com.google.osdetector' version '1.7.3'
@@ -60,6 +59,9 @@ ext {
         }
         return output.split(" ")[1]
     }
+
+    // osdetector returns 'aarch_64', but rust triplet has 'aarch64'
+    arch = osdetector.arch == 'aarch_64' ? 'aarch64' : osdetector.arch
 }
 
 tasks.register('prepareProtoCompiler', Copy) {
@@ -166,19 +168,45 @@ compileJava.dependsOn('protobuf')
 clean.dependsOn('cleanProtobuf', 'cleanRust')
 
 tasks.register('copyNativeLib', Copy) {
+    println "start copyNativeLib"
+    def os = osdetector.os
     def target
+    def libGlideLocation
     if (project.hasProperty('target')) {
         target = project.target
-        from "${projectDir}/../target/${target}/release/"
-    } else if (osdetector.os == 'linux' && osdetector.release.id != 'alpine') {
-        from "${projectDir}/../target/${arch}-unknown-linux-gnu/release/"
-    } else if (osdetector.os == 'linux' && osdetector.release.id == 'alpine') {
-        from "${projectDir}/../target/${arch}-unknown-linux-musl/release/"
+        libGlideLocation = "${projectDir}/../target/${target}/release/"
+    } else if (os == 'linux' && osdetector.release.id != 'alpine') {
+        libGlideLocation = "${projectDir}/../target/${arch}-unknown-linux-gnu/release/"
+    } else if (os == 'linux' && osdetector.release.id == 'alpine') {
+        libGlideLocation = "${projectDir}/../target/${arch}-unknown-linux-musl/release/"
     } else {
-        from "${projectDir}/../target/release/"
+        libGlideLocation = "${projectDir}/../target/release/"
     }
+    println "copying source libglide for os/arch ${os}/${arch} from ${libGlideLocation} with target: ${target}"
+
+    from libGlideLocation
     include "*.dylib", "*.so", "*.dll"
     into sourceSets.main.output.resourcesDir
+
+    // Rename libglide_rs.<ext> → libglide_rs-<os.detected.classifier>.<ext>
+    rename { fileName ->
+        def matcher = (fileName =~ /^libglide_rs\.(.+)$/)
+        if (matcher.matches()) {
+            def newLibGlideName = "libglide_rs-${osdetector.classifier}.${matcher[0][1]}"
+            println "renaming libglide to ${newLibGlideName}"
+            return newLibGlideName
+        }
+        return fileName
+    }
+
+    // Delete the original libglide_rs.<ext>
+    doLast {
+        // Remove original libglide_rs.* files
+        fileTree(destinationDir).matching {
+            include "libglide_rs.*"
+        }.each { it.delete() }
+    }
+    println "finish copyNativeLib"
 }
 
 delombok.dependsOn('compileJava')
@@ -265,10 +293,6 @@ tasks.withType(Sign) {
     def releaseVersion = System.getenv("GLIDE_RELEASE_VERSION") ?: defaultReleaseVersion;
     def isReleaseVersion = !releaseVersion.endsWith("SNAPSHOT") && releaseVersion != defaultReleaseVersion;
     onlyIf("isReleaseVersion is set") { isReleaseVersion }
-}
-
-signing {
-    sign publishing.publications
 }
 
 tasks.withType(Test) {
