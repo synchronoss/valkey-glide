@@ -56,7 +56,7 @@ subprojects {
         toolchain {
             languageVersion.set(JavaLanguageVersion.of(11))
             // Only specify vendor when no JAVA_HOME is set (i.e., no setup-java used)
-            if (!System.getenv("GLIDE_CONTAINER_BUILD") && 
+            if (!System.getenv("GLIDE_CONTAINER_BUILD") &&
                 !System.getenv("JAVA_HOME")) {
                 vendor = JvmVendorSpec.ADOPTIUM // Temurin
             }
@@ -77,7 +77,7 @@ subprojects {
     }
 
     ext {
-        defaultReleaseVersion = "255.255.255"
+        defaultReleaseVersion = "255.255.255-sncr"
         failedTests = []
     }
 

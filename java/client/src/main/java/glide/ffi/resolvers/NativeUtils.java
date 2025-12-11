@@ -2,23 +2,45 @@
 package glide.ffi.resolvers;
 
 import java.io.*;
-import java.nio.file.FileSystemNotFoundException;
-import java.nio.file.FileSystems;
-import java.nio.file.Files;
-import java.nio.file.ProviderNotFoundException;
-import java.nio.file.StandardCopyOption;
+import java.net.URL;
+import java.nio.file.*;
+import java.util.Locale;
+import java.util.logging.Level;
 
 /**
- * A simple library class which helps with loading dynamic libraries stored in the JAR archive.
- * These libraries usually contain implementation of some methods in native code (using JNI - Java
- * Native Interface).
+ * A modified version of {@code NativeUtils} from the valkey-glide project. This utility class
+ * facilitates loading native libraries packaged within JAR archives.
  *
- * @see <a
- *     href="https://raw.githubusercontent.com/adamheinrich/native-utils/master/src/main/java/cz/adamh/utils/NativeUtils.java">https://raw.githubusercontent.com/adamheinrich/native-utils/master/src/main/java/cz/adamh/utils/NativeUtils.java</a>
- * @see <a
- *     href="https://github.com/adamheinrich/native-utils">https://github.com/adamheinrich/native-utils</a>
+ * <p>This version of {@code NativeUtils} assumes that the {@code libglide_rs.<ext>} files are named
+ * in the format {@code libglide_rs-<os>-<classifier>.<ext>}. For example, instead of {@code
+ * libglide_rs.so}, it could be {@code libglide_rs-linux-x86_64.so}.
+ *
+ * <p>The following runtime libraries are supported for discovery:
+ *
+ * <ul>
+ *   <li>{@code libglide_rs-osx-aarch_64.dylib}
+ *   <li>{@code libglide_rs-osx-x86_64.dylib}
+ *   <li>{@code libglide_rs-linux-aarch_64.so}
+ *   <li>{@code libglide_rs-linux-x86_64.so}
+ * </ul>
+ *
+ * <p>Original sources:
+ *
+ * <ul>
+ *   <li><a
+ *       href="https://github.com/valkey-io/valkey-glide/blob/main/java/client/src/main/java/glide/ffi/resolvers/NativeUtils.java">
+ *       https://github.com/valkey-io/valkey-glide/blob/main/java/client/src/main/java/glide/ffi/resolvers/NativeUtils.java</a>
+ *   <li><a
+ *       href="https://raw.githubusercontent.com/adamheinrich/native-utils/master/src/main/java/cz/adamh/utils/NativeUtils.java">
+ *       https://raw.githubusercontent.com/adamheinrich/native-utils/master/src/main/java/cz/adamh/utils/NativeUtils.java</a>
+ *   <li><a href="https://github.com/adamheinrich/native-utils">
+ *       https://github.com/adamheinrich/native-utils</a>
+ * </ul>
  */
-public class NativeUtils {
+public final class NativeUtils {
+
+    private static final java.util.logging.Logger logger =
+            java.util.logging.Logger.getLogger(NativeUtils.class.getName());
 
     /**
      * The minimum length a prefix for a file has to have according to {@link
@@ -26,6 +48,7 @@ public class NativeUtils {
      */
     private static final int MIN_PREFIX_LENGTH = 3;
 
+    /** Temporary directory to store the native runtime when loading. */
     public static final String NATIVE_FOLDER_PATH_PREFIX = "nativeutils";
 
     /** Temporary directory which will contain the dynamic library files. */
@@ -33,6 +56,18 @@ public class NativeUtils {
 
     /** Track if the Glide library has already been loaded */
     private static volatile boolean glideLibLoaded = false;
+
+    /** The native runtime filename for macOS (arm). */
+    private static final String LIB_OSX_AARCH_64 = "libglide_rs-osx-aarch_64.dylib";
+
+    /** The native runtime filename for macOS (x86). */
+    private static final String LIB_OSX_X86_64 = "libglide_rs-osx-x86_64.dylib";
+
+    /** The native runtime filename for Linux (arm). */
+    private static final String LIB_LINUX_AARCH_64 = "libglide_rs-linux-aarch_64.so";
+
+    /** The native runtime filename for Linux (x86). */
+    private static final String LIB_LINUX_X86_64 = "libglide_rs-linux-x86_64.so";
 
     /** Private constructor - this class will never be instanced */
     private NativeUtils() {}
@@ -42,28 +77,27 @@ public class NativeUtils {
         if (glideLibLoaded) {
             return;
         }
-
-        String glideLib = "/libglide_rs";
         try {
-            String osName = System.getProperty("os.name").toLowerCase();
-            if (osName.contains("mac")) {
-                NativeUtils.loadLibraryFromJar(glideLib + ".dylib");
-            } else if (osName.contains("linux")) {
-                NativeUtils.loadLibraryFromJar(glideLib + ".so");
-            } else if (osName.contains("windows")) {
-                NativeUtils.loadLibraryFromJar("/glide_rs.dll");
-            } else {
-                throw new UnsupportedOperationException(
-                        "OS not supported. Glide is only available on Mac OS, Linux, and Windows systems.");
-            }
-            glideLibLoaded = true; // Mark as loaded after successful load
+            logClassInfo();
+            String libName = "/" + determineLibName();
+            NativeUtils.loadLibraryFromJar(libName);
+            glideLibLoaded = true;
         } catch (java.io.IOException e) {
             e.printStackTrace();
         }
     }
 
+    /** Logs the location that NativeUtils was loaded from. Useful for debugging. */
+    private static void logClassInfo() {
+        Class<?> clazz = NativeUtils.class;
+        URL location = clazz.getProtectionDomain().getCodeSource().getLocation();
+        log(
+                Level.FINE,
+                String.format("Using NativeUtils class: %s from %s", clazz.getName(), location));
+    }
+
     /**
-     * Loads library from current JAR archive
+     * Loads library from current the classpath.
      *
      * <p>The file from JAR is copied into system temporary directory and then loaded. The temporary
      * file is deleted after exiting. Method uses String as filename because the pathname is
@@ -76,7 +110,7 @@ public class NativeUtils {
      * @throws IllegalArgumentException If the path is not absolute or if the filename is shorter than
      *     <code>MIN_PREFIX_LENGTH</code> (restriction of {@link File#createTempFile(java.lang.String,
      *     java.lang.String)}).
-     * @throws FileNotFoundException If the file could not be found inside the JAR.
+     * @throws FileNotFoundException If the file could not be found on the classpath.
      */
     public static void loadLibraryFromJar(String path) throws IOException {
 
@@ -114,7 +148,9 @@ public class NativeUtils {
         }
 
         try {
+            log(Level.FINE, "Loading native library: " + temp.getName());
             System.load(temp.getAbsolutePath());
+            log(Level.INFO, "Successfully loaded native library: " + temp.getName());
         } finally {
             if (isPosixCompliant()) {
                 // Assume POSIX compliant file system, can be deleted after loading
@@ -124,6 +160,23 @@ public class NativeUtils {
                 temp.deleteOnExit();
             }
         }
+    }
+
+    private static String determineLibName() {
+        String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
+        String arch = System.getProperty("os.arch", "").toLowerCase(Locale.ROOT);
+        boolean isArm = arch.contains("aarch") || arch.contains("arm");
+        final String libName;
+        if (os.contains("mac")) {
+            libName = isArm ? LIB_OSX_AARCH_64 : LIB_OSX_X86_64;
+        } else if (os.contains("linux")) {
+            libName = isArm ? LIB_LINUX_AARCH_64 : LIB_LINUX_X86_64;
+        } else {
+            throw new UnsupportedOperationException(
+                    "OS not supported. Glide is only available on Mac OS and Linux systems.");
+        }
+        log(Level.FINE, "Determined native library name: " + libName);
+        return libName;
     }
 
     private static void cleanupTempFile(File temp) {
@@ -148,5 +201,11 @@ public class NativeUtils {
             throw new IOException("Failed to create temp directory " + generatedDir.getName());
 
         return generatedDir;
+    }
+
+    private static void log(Level level, String message) {
+        if (logger.isLoggable(level)) {
+            logger.log(level, String.format("[NativeUtils] %s", message));
+        }
     }
 }
