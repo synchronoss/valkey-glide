@@ -34,25 +34,13 @@ jobs:
               id: load-platform-matrix
               shell: bash
               run: |
+                  # Filter entries with maven in PACKAGE_MANAGERS and replace "ephemeral" with "persistent" in RUNNER
                   export PLATFORM_MATRIX=$(jq 'map(
-                      select(
-                          (.PACKAGE_MANAGERS != null) and (.PACKAGE_MANAGERS | contains(["maven"]))
-                              and (
-                                  ( (.RUNNER | type == "array") and (.RUNNER[1] != "Windows") )
-                              or
-                                  ( (.RUNNER | type != "array") and ((.RUNNER | test("(?i)windows")) | not) )
-                              )
-                          )
+                      select(.PACKAGE_MANAGERS != null and (.PACKAGE_MANAGERS | contains(["maven"])))
                       | .RUNNER = (
-                          if (.RUNNER | type == "array") then
-                              # Map Linux ARM64 ephemeral to GitHub-hosted runner
-                              if (.RUNNER[0]=="self-hosted" and .RUNNER[1]=="Linux" and .RUNNER[2]=="ARM64") then
-                                  "ubuntu-24.04-arm"
-                              else
-                                  (.RUNNER | map(if . == "ephemeral" then "persistent" else . end))
-                              end
-                          else
-                              if .RUNNER == "ephemeral" then "persistent" else .RUNNER end
+                          if (.RUNNER | type == "array")
+                          then (.RUNNER | map(if . == "ephemeral" then "persistent" else . end))
+                          else (if .RUNNER == "ephemeral" then "persistent" else .RUNNER end)
                           end
                       )
                   )' < .github/json_matrices/build-matrix.json | jq -c .)
