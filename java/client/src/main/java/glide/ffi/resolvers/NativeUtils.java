@@ -40,7 +40,7 @@ import java.util.logging.Level;
 public final class NativeUtils {
 
     private static final java.util.logging.Logger logger =
-            java.util.logging.Logger.getLogger(NativeUtils.class.getName());
+        java.util.logging.Logger.getLogger(NativeUtils.class.getName());
 
     /**
      * The minimum length a prefix for a file has to have according to {@link
@@ -69,9 +69,6 @@ public final class NativeUtils {
     /** The native runtime filename for Linux (x86). */
     private static final String LIB_LINUX_X86_64 = "libglide_rs-linux-x86_64.so";
 
-    /** The native runtime filename for Windows (x86). */
-    private static final String LIB_WINDOWS_X86_64 = "libglide_rs-windows-x86_64.dll";
-
     /** Private constructor - this class will never be instanced */
     private NativeUtils() {}
 
@@ -95,8 +92,8 @@ public final class NativeUtils {
         Class<?> clazz = NativeUtils.class;
         URL location = clazz.getProtectionDomain().getCodeSource().getLocation();
         log(
-                Level.FINE,
-                String.format("Using NativeUtils class: %s from %s", clazz.getName(), location));
+            Level.FINE,
+            String.format("Using NativeUtils class: %s from %s", clazz.getName(), location));
     }
 
     /**
@@ -128,7 +125,7 @@ public final class NativeUtils {
         // Check if the filename is okay
         if (filename == null || filename.length() < MIN_PREFIX_LENGTH) {
             throw new IllegalArgumentException(
-                    "The filename has to be at least " + MIN_PREFIX_LENGTH + " characters long.");
+                "The filename has to be at least " + MIN_PREFIX_LENGTH + " characters long.");
         }
 
         // Prepare temporary file
@@ -169,17 +166,14 @@ public final class NativeUtils {
         String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
         String arch = System.getProperty("os.arch", "").toLowerCase(Locale.ROOT);
         boolean isArm = arch.contains("aarch") || arch.contains("arm");
-        String libName = null;
+        final String libName;
         if (os.contains("mac")) {
             libName = isArm ? LIB_OSX_AARCH_64 : LIB_OSX_X86_64;
         } else if (os.contains("linux")) {
             libName = isArm ? LIB_LINUX_AARCH_64 : LIB_LINUX_X86_64;
-        } else if (os.contains("windows") && !isArm) {
-            libName = LIB_WINDOWS_X86_64;
-        }
-        if (libName == null) {
+        } else {
             throw new UnsupportedOperationException(
-                    "OS not supported. Glide is only available on Mac OS, Linux and Windows (x86) systems.");
+                "OS not supported. Glide is only available on Mac OS and Linux systems.");
         }
         log(Level.FINE, "Determined native library name: " + libName);
         return libName;
