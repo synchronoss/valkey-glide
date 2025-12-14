@@ -6,7 +6,11 @@ fn build_protobuf() {
         .lite_runtime(false)
         .tokio_bytes(true)
         .tokio_bytes_for_string(true);
-    protobuf_codegen::Codegen::new()
+    let mut codegen = protobuf_codegen::Codegen::new();
+    if let Ok(proto_path) = std::env::var("PROTOC_PATH") {
+        codegen.protoc_path(std::path::Path::new(&proto_path));
+    }
+    codegen
         .cargo_out_dir("protobuf")
         .include("src")
         .input("src/protobuf/command_request.proto")
