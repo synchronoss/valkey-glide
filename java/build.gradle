@@ -76,7 +76,7 @@ subprojects {
     }
 
     ext {
-        defaultReleaseVersion = "255.255.255"
+        defaultReleaseVersion = "255.255.255-sncr"
         failedTests = []
     }
 
