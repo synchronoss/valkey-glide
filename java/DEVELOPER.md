@@ -178,7 +178,7 @@ Some troubleshooting issues:
 
 An example app (`glide.examples.ExamplesApp`) is available under [examples project](../examples/java). To run the ExamplesApp against a local build of valkey-glide client, you can publish your JAR to local Maven repository as a dependency.
 
-To publish to local maven run (default version `255.255.255`):
+To publish to local maven run (default version `255.255.255-sncr`):
 
 ```bash
 # Run from the `examples/java` folder
@@ -193,7 +193,7 @@ repositories {
 }
 dependencies {
     // Update to use version defined in the previous step
-    implementation group: 'io.valkey', name: 'valkey-glide', version: '255.255.255'
+    implementation group: 'io.valkey', name: 'valkey-glide', version: '255.255.255-sncr'
 }
 ```
 
