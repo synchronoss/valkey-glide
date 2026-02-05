@@ -567,6 +567,7 @@ fn set_connection_info_to_connection_request(
     connection_request: &mut connection_request::ConnectionRequest,
 ) {
     connection_request.protocol = convert_to_protobuf_protocol(connection_info.protocol).into();
+    #[allow(clippy::unnecessary_unwrap)]
     if connection_info.password.is_some() {
         connection_request.authentication_info =
             protobuf::MessageField(Some(Box::new(AuthenticationInfo {
