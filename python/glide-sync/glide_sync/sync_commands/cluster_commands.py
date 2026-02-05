@@ -1041,7 +1041,7 @@ class ClusterCommands(CoreCommands):
             args.extend(["VERSION", str(version)])
         if parameters:
             for var in parameters:
-                args.extend(str(var))
+                args.append(str(var))
         return cast(
             TClusterResponse[bytes],
             self._execute_command(RequestType.Lolwut, args, route),

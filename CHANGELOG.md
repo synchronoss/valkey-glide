@@ -1,3 +1,11 @@
+## 2.1.1-sncr
+
+* JAVA: Multi-platform support with explicitly named libglide_rs runtimes and custom NativeUtils
+* Rust: Add RUSTSEC-2025-0141 to ignore list in deny.toml ([#5137](https://github.com/valkey-io/valkey-glide/pull/5137))
+* Rust: Add RUSTSEC-2025-0124 to ignore list in deny.toml
+* Rust: Migrate from rustls-pemfile usage to rustls-pki-types ([#5037](https://github.com/valkey-io/valkey-glide/pull/5037))
+* CORE: LOLWUT Tests and Add Version 9 Support ([#4907](https://github.com/valkey-io/valkey-glide/pull/4907))
+
 ## 2.1.1
 
 #### Changes
@@ -15,7 +23,7 @@
 * PYTHON: Add MOVE command support for cluster clients ([#4751](https://github.com/valkey-io/valkey-glide/pull/4751))
 * JAVA: Add cluster support for Move command ([#4749])(https://github.com/valkey-io/valkey-glide/pull/4749)
 
-#### Fixes 
+#### Fixes
 
 * CORE: Fix SELECT Command Database Persistence Across Reconnections ([#4764](https://github.com/valkey-io/valkey-glide/issues/#4764))
 * Rust: Updates the `install-rust-and-protoc` action to explicitly include the `rustfmt` and `clippy` components. ([#4816](https://github.com/valkey-io/valkey-glide/issues/4816))

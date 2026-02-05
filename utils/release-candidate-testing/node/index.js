@@ -68,7 +68,7 @@ async function closeClientAndCluster(client, Cluster) {
 
 async function getServerVersion(addresses, clusterMode) {
     // General version for those tests
-    return "255.255.255";
+    return "255.255.255-sncr";
 }
 
 async function clusterTests() {

@@ -977,6 +977,7 @@ fn setup_connection(
         }
     }
 
+    #[allow(clippy::unnecessary_unwrap)]
     if connection_info.client_name.is_some() {
         match cmd("CLIENT")
             .arg("SETNAME")
